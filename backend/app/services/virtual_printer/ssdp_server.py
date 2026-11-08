@@ -13,6 +13,8 @@ import re
 import socket
 import struct
 
+from backend.app.services.virtual_printer.constants import DEFAULT_VIRTUAL_PRINTER_VERSION
+
 logger = logging.getLogger(__name__)
 
 # SSDP addresses - Bambu uses port 2021
@@ -36,6 +38,7 @@ class VirtualPrinterSSDPServer:
         advertise_ip: str = "",
         bind_ip: str = "",
         extra_interfaces: list[str] | None = None,
+        version: str | None = None,
     ):
         """Initialize the SSDP server.
 
@@ -49,10 +52,12 @@ class VirtualPrinterSSDPServer:
                 NOTIFY and M-SEARCH responses are sent on these interfaces too,
                 but Location always points to the bind IP so the slicer connects
                 to the correct address for MQTT/FTP.
+            version: Firmware version string to advertise (defaults to DEFAULT_VIRTUAL_PRINTER_VERSION)
         """
         self.name = name
         self.serial = serial
         self.model = model
+        self.version = version or DEFAULT_VIRTUAL_PRINTER_VERSION
         self._bind_ip = bind_ip
         self._running = False
         # Set after the primary multicast socket is bound — see ftp_server.py
@@ -98,7 +103,7 @@ class VirtualPrinterSSDPServer:
             "DevBind.bambu.com: free\r\n"
             "Devseclink.bambu.com: secure\r\n"
             "DevInf.bambu.com: eth0\r\n"
-            "DevVersion.bambu.com: 01.07.00.00\r\n"
+            f"DevVersion.bambu.com: {self.version}\r\n"
             "DevCap.bambu.com: 1\r\n"
             "\r\n"
         )
@@ -121,7 +126,7 @@ class VirtualPrinterSSDPServer:
             "DevBind.bambu.com: free\r\n"
             "Devseclink.bambu.com: secure\r\n"
             "DevInf.bambu.com: eth0\r\n"
-            "DevVersion.bambu.com: 01.07.00.00\r\n"
+            f"DevVersion.bambu.com: {self.version}\r\n"
             "DevCap.bambu.com: 1\r\n"
             "\r\n"
         )

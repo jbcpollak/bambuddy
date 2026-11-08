@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from backend.app.services.virtual_printer._debug import append_event, dump_wire
+from backend.app.services.virtual_printer.constants import DEFAULT_VIRTUAL_PRINTER_VERSION
 
 if TYPE_CHECKING:
     from backend.app.services.virtual_printer.mqtt_bridge import MQTTBridge
@@ -972,7 +973,7 @@ class SimpleMQTTServer:
                         {
                             "name": "ota",
                             "product_name": product_name,
-                            "sw_ver": "01.07.00.00",
+                            "sw_ver": DEFAULT_VIRTUAL_PRINTER_VERSION,
                             "sw_new_ver": "",
                             "hw_ver": "OTA",
                             "sn": serial,
