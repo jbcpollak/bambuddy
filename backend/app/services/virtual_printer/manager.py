@@ -23,6 +23,10 @@ from backend.app.models.virtual_printer import (
 from backend.app.services.bambu_mqtt import resolve_external_spools_in_mapping
 from backend.app.services.virtual_printer.bind_server import BindServer
 from backend.app.services.virtual_printer.certificate import CertificateService
+from backend.app.services.virtual_printer.constants import (
+    DEFAULT_VIRTUAL_PRINTER_MODEL,
+    DEFAULT_VIRTUAL_PRINTER_VERSION as DEFAULT_VIRTUAL_PRINTER_VERSION,
+)
 from backend.app.services.virtual_printer.ftp_server import VirtualPrinterFTPServer, compute_passive_port_slice
 from backend.app.services.virtual_printer.mqtt_bridge import MQTTBridge
 from backend.app.services.virtual_printer.mqtt_server import SimpleMQTTServer
@@ -103,8 +107,6 @@ MODEL_SERIAL_PREFIXES = {
 # Reverse mapping: display name → SSDP model code (for auto-inheriting from printer model)
 DISPLAY_NAME_TO_MODEL_CODE = {v: k for k, v in VIRTUAL_PRINTER_MODELS.items()}
 
-# Default model
-DEFAULT_VIRTUAL_PRINTER_MODEL = "BL-P001"  # X1C
 
 # Bound on per-instance ``_slicer_print_options`` cache size. The slicer's
 # project_file MQTT command stashes one dict per filename; the
@@ -1509,9 +1511,10 @@ class VirtualPrinterInstance:
                 )
 
         # Bind server
+        model_code = DISPLAY_NAME_TO_MODEL_CODE.get(self.model, self.model or DEFAULT_VIRTUAL_PRINTER_MODEL)
         self._bind = BindServer(
             serial=self.serial,
-            model=self.model or DEFAULT_VIRTUAL_PRINTER_MODEL,
+            model=model_code,
             name=self.name,
             bind_address=bind_addr,
             cert_path=cert_path,
@@ -1532,7 +1535,7 @@ class VirtualPrinterInstance:
         self._ssdp = VirtualPrinterSSDPServer(
             name=self.name,
             serial=self.serial,
-            model=self.model or DEFAULT_VIRTUAL_PRINTER_MODEL,
+            model=model_code,
             advertise_ip=advertise_addr,
             bind_ip=bind_addr,
         )
@@ -1610,18 +1613,14 @@ class VirtualPrinterInstance:
 
         cert_path, key_path, _ = self._resolve_cert_and_advertise()
 
+        # In proxy mode, forward bind ports (3000/3002) directly to target printer
         self._proxy = SlicerProxyManager(
             target_host=self.target_printer_ip,
             cert_path=cert_path,
             key_path=key_path,
             on_activity=lambda n, m: logger.info("[VP %s] Proxy %s: %s", self.name, n, m),
             bind_address=self.bind_ip or "0.0.0.0",  # nosec B104
-            bind_identity={
-                "serial": self.target_printer_serial or self.serial,
-                "model": self.model or DEFAULT_VIRTUAL_PRINTER_MODEL,
-                "name": self.name,
-                "version": "01.00.00.00",
-            },
+            bind_identity=None,
         )
 
         async def run_with_logging(coro, svc_name):
@@ -1665,10 +1664,11 @@ class VirtualPrinterInstance:
 
     def _start_fallback_ssdp(self, proxy_serial: str, run_with_logging) -> None:
         """Start single-interface SSDP server as fallback for proxy mode."""
+        model_code = DISPLAY_NAME_TO_MODEL_CODE.get(self.model, self.model or DEFAULT_VIRTUAL_PRINTER_MODEL)
         self._ssdp = VirtualPrinterSSDPServer(
             name=f"{self.name} (Proxy)",
             serial=proxy_serial,
-            model=self.model or DEFAULT_VIRTUAL_PRINTER_MODEL,
+            model=model_code,
             advertise_ip=self.bind_ip or "",
             bind_ip=self.bind_ip or "",
         )

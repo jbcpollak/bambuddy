@@ -23,6 +23,8 @@ import ssl
 import struct
 from pathlib import Path
 
+from backend.app.services.virtual_printer.constants import DEFAULT_VIRTUAL_PRINTER_VERSION
+
 logger = logging.getLogger(__name__)
 
 BIND_PORT_PLAIN = 3000
@@ -49,7 +51,7 @@ class BindServer:
         serial: str,
         model: str,
         name: str,
-        version: str = "01.00.00.00",
+        version: str | None = None,
         bind_address: str = "0.0.0.0",  # nosec B104
         cert_path: Path | None = None,
         key_path: Path | None = None,
@@ -57,7 +59,7 @@ class BindServer:
         self.serial = serial
         self.model = model
         self.name = name
-        self.version = version
+        self.version = version or DEFAULT_VIRTUAL_PRINTER_VERSION
         self.bind_address = bind_address
         self.cert_path = cert_path
         self.key_path = key_path
@@ -167,61 +169,64 @@ class BindServer:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Handle a single bind/detect request from a slicer."""
+        """Handle bind/detect requests from a slicer."""
         peername = writer.get_extra_info("peername")
         client_id = f"{peername[0]}:{peername[1]}" if peername else "unknown"
         logger.info("Bind server: client connected from %s", client_id)
 
         try:
-            # Read the framed message (timeout after 10s)
-            data = await asyncio.wait_for(reader.read(4096), timeout=10.0)
-            if not data:
-                return
+            while self._running:
+                # Read the framed message (timeout after 30s)
+                try:
+                    data = await asyncio.wait_for(reader.read(4096), timeout=30.0)
+                except TimeoutError:
+                    break
+                if not data:
+                    break
 
-            # Parse the request
-            request = self._parse_frame(data)
-            if request is None:
-                logger.warning("Bind server: invalid frame from %s", client_id)
-                return
+                # Parse the request
+                request = self._parse_frame(data)
+                if request is None:
+                    logger.warning("Bind server: invalid frame from %s", client_id)
+                    continue
 
-            logger.info("Bind server: received from %s: %s", client_id, request)
+                logger.info("Bind server: received from %s: %s", client_id, request)
 
-            # Check if this is a detect command
-            login = request.get("login", {})
-            if not isinstance(login, dict) or login.get("command") != "detect":
-                logger.warning("Bind server: unexpected command from %s: %s", client_id, request)
-                return
+                # Check if this is a detect command
+                login = request.get("login", {})
+                if not isinstance(login, dict) or login.get("command") != "detect":
+                    logger.warning("Bind server: unexpected command from %s: %s", client_id, request)
+                    continue
 
-            # Build response. `sequence_id` is an INTEGER counter chosen by
-            # the printer side (not an echo of the slicer's string seq_id).
-            # The protocol docstring at the top of this file documents the
-            # asymmetry: slicer sends `"20000"` (string), printer replies
-            # with an int. The hardcoded 3021 mirrors real-firmware-captured
-            # value; an earlier audit suggesting we echo the slicer's seq_id
-            # was wrong and would have broken slicers that validate the
-            # type (int vs string).
-            response = {
-                "login": {
-                    "bind": "free",
-                    "command": "detect",
-                    "connect": "lan",
-                    "dev_cap": 1,
-                    "id": self.serial,
-                    "model": self.model,
-                    "name": self.name,
-                    "sequence_id": 3021,
-                    "version": self.version,
+                # Echo the client sequence_id if provided (real firmware echoes client sequence_id)
+                seq_id = login.get("sequence_id", 3021)
+
+                from backend.app.services.virtual_printer.manager import DISPLAY_NAME_TO_MODEL_CODE
+
+                model_code = DISPLAY_NAME_TO_MODEL_CODE.get(self.model, self.model)
+
+                response = {
+                    "login": {
+                        "bind": "free",
+                        "command": "detect",
+                        "connect": "lan",
+                        "dev_cap": 1,
+                        "id": self.serial,
+                        "model": model_code,
+                        "name": self.name,
+                        "sequence_id": seq_id,
+                        "version": self.version,
+                    }
                 }
-            }
 
-            frame = self._build_frame(response)
-            writer.write(frame)
-            await writer.drain()
+                frame = self._build_frame(response)
+                writer.write(frame)
+                await writer.drain()
 
-            logger.info("Bind server: sent detect response to %s (serial=%s)", client_id, self.serial)
+                logger.info(
+                    "Bind server: sent detect response to %s (serial=%s, model=%s)", client_id, self.serial, model_code
+                )
 
-        except TimeoutError:
-            logger.debug("Bind server: timeout waiting for data from %s", client_id)
         except Exception as e:
             logger.error("Bind server: error handling %s: %s", client_id, e)
         finally:

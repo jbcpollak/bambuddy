@@ -3784,6 +3784,33 @@ class TestSSDPServer:
 
         assert b"DevModel.bambu.com: BL-P001" in message
 
+    def test_ssdp_server_uses_default_version(self, ssdp_server):
+        """Verify SSDP server includes DEFAULT_VIRTUAL_PRINTER_VERSION."""
+        from backend.app.services.virtual_printer.constants import DEFAULT_VIRTUAL_PRINTER_VERSION
+
+        ssdp_server._local_ip = "192.168.1.100"
+        notify_msg = ssdp_server._build_notify_message()
+        resp_msg = ssdp_server._build_response_message()
+
+        expected = f"DevVersion.bambu.com: {DEFAULT_VIRTUAL_PRINTER_VERSION}\r\n".encode()
+        assert expected in notify_msg
+        assert expected in resp_msg
+
+    def test_ssdp_server_custom_version(self):
+        """Verify custom firmware version is used in SSDP announcements."""
+        from backend.app.services.virtual_printer.ssdp_server import VirtualPrinterSSDPServer
+
+        server = VirtualPrinterSSDPServer(
+            serial="TEST123",
+            name="TestPrinter",
+            model="BL-P001",
+            advertise_ip="10.0.0.50",
+            version="01.09.00.00",
+        )
+        assert server.version == "01.09.00.00"
+        msg = server._build_notify_message()
+        assert b"DevVersion.bambu.com: 01.09.00.00\r\n" in msg
+
     # ========================================================================
     # Tests for advertise_ip parameter
     # ========================================================================
@@ -4104,10 +4131,12 @@ class TestBindServer:
 
     def test_bind_server_stores_config(self, bind_server):
         """Verify bind server stores serial, model, name."""
+        from backend.app.services.virtual_printer.constants import DEFAULT_VIRTUAL_PRINTER_VERSION
+
         assert bind_server.serial == "09400A391800001"
         assert bind_server.model == "O1D"
         assert bind_server.name == "Bambuddy"
-        assert bind_server.version == "01.00.00.00"
+        assert bind_server.version == DEFAULT_VIRTUAL_PRINTER_VERSION
 
     def test_bind_server_custom_version(self):
         """Verify custom firmware version is stored."""
@@ -4779,10 +4808,12 @@ class TestBindServer:
 
     def test_bind_server_stores_config(self, bind_server):
         """Verify config is stored correctly."""
+        from backend.app.services.virtual_printer.constants import DEFAULT_VIRTUAL_PRINTER_VERSION
+
         assert bind_server.serial == "01S00C000000001"
         assert bind_server.model == "BL-P001"
         assert bind_server.name == "Bambuddy"
-        assert bind_server.version == "01.00.00.00"
+        assert bind_server.version == DEFAULT_VIRTUAL_PRINTER_VERSION
 
     def test_bind_server_custom_version(self):
         """Verify custom firmware version is stored."""
